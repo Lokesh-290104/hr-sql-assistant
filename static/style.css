@@ -202,3 +202,8 @@ th { position: sticky; top: 0; background: var(--code-bg); font-weight: 600; }
   .sidebar { visibility: hidden; transition: transform .2s, visibility .2s; box-shadow: 0 0 0 100vmax rgb(0 0 0 / 0); }
   .sidebar.open { visibility: visible; box-shadow: 0 0 0 100vmax rgb(0 0 0 / .4); }
 }
+
+/* Single-value answers: the number is the answer. */
+.stat { display: flex; flex-direction: column; gap: 2px; margin: 12px 0 4px; }
+.stat-value { font-size: 36px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.stat-label { font-size: 14px; color: var(--muted); }
