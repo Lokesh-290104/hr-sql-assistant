@@ -216,3 +216,5 @@ th { position: sticky; top: 0; background: var(--code-bg); font-weight: 600; }
   .schema summary { padding: 12px 0; }
   .chip, .text-btn, .icon-btn { min-height: 44px; }
 }
+
+::selection { background: var(--accent-soft); color: var(--text); }
