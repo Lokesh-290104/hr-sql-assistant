@@ -154,8 +154,8 @@ pre {
   margin: 8px 0 0;
 }
 
-.table-wrap { overflow: auto; max-height: 420px; margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; }
-table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.table-wrap { width: fit-content; max-width: 100%; overflow: auto; max-height: 420px; margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; }
+table { border-collapse: collapse; min-width: min(100%, 360px); font-size: 14px; }
 th, td { padding: 7px 10px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
 th { position: sticky; top: 0; background: var(--code-bg); font-weight: 600; }
 :is(td, th).num { text-align: right; font-variant-numeric: tabular-nums; }
