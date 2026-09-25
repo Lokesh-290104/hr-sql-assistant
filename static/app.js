@@ -76,7 +76,12 @@ function renderAnswer(data) {
   if (data.row_count === 0) {
     result = el("p", { class: "meta" }, "The query ran successfully but returned no rows.");
   } else if (data.row_count === 1 && data.columns.length === 1) {
-    result = el("p", {}, el("strong", {}, `${data.columns[0]}: ${formatCell(data.rows[0][0])}`));
+    result = el(
+      "div",
+      { class: "stat" },
+      el("span", { class: "stat-value" }, formatCell(data.rows[0][0])),
+      el("span", { class: "stat-label" }, humanize(data.columns[0]))
+    );
   } else {
     result = renderTable(data.columns, data.rows);
   }
