@@ -74,8 +74,9 @@ select, input {
 
 .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 
-.schema details { border-bottom: 1px solid var(--border); padding: 6px 0; }
-.schema summary { cursor: pointer; font-family: var(--font-mono); font-size: 13px; }
+.schema details { border-bottom: 1px solid var(--border); }
+.schema summary { cursor: pointer; font-family: var(--font-mono); font-size: 13px; padding: 7px 0; }
+.schema details[open] { padding-bottom: 6px; }
 .schema ul { margin: 6px 0 4px; padding-left: 16px; list-style: none; }
 .schema li { font-family: var(--font-mono); font-size: 12px; color: var(--muted); padding: 1px 0; }
 .schema .desc { font-size: 12px; color: var(--muted); margin: 4px 0 0; }
@@ -209,3 +210,9 @@ th { position: sticky; top: 0; background: var(--code-bg); font-weight: 600; }
 .stat { display: flex; flex-direction: column; gap: 2px; margin: 12px 0 4px; }
 .stat-value { font-size: 36px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .stat-label { font-size: 14px; color: var(--muted); }
+
+@media (pointer: coarse) {
+  /* Comfortable tap targets on touch screens */
+  .schema summary { padding: 12px 0; }
+  .chip, .text-btn, .icon-btn { min-height: 44px; }
+}
