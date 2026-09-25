@@ -15,7 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app import db
 from app.config import settings
-from app.llm import GeminiClient, LLMError
+from app.llm import LLMError, create_llm_client
 from app.models import metadata
 from app.service import ROLE_EXCLUSIONS, QueryAssistant
 
@@ -66,7 +66,7 @@ class QueryRequest(BaseModel):
 
 @lru_cache
 def get_assistant() -> QueryAssistant:
-    return QueryAssistant(GeminiClient())
+    return QueryAssistant(create_llm_client())
 
 
 @app.get("/api/health")
@@ -78,11 +78,11 @@ def health(response: Response):
     except SQLAlchemyError:
         database = "unreachable"
         response.status_code = 503
-    model = settings.gemini_model
+    model = settings.gemini_model if settings.llm_provider == "gemini" else settings.openrouter_models[0]
     if get_assistant.cache_info().currsize:
         model = getattr(get_assistant().llm, "active_model", model)
     return {"status": "ok" if database == "ok" else "degraded", "database": database,
-            "dialect": db.dialect_name(), "model": model}
+            "dialect": db.dialect_name(), "provider": settings.llm_provider, "model": model}
 
 
 @app.get("/api/roles")

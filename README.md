@@ -42,7 +42,10 @@ flowchart LR
 5. **Defence in depth.** The app connects as a MySQL user with only `SELECT` grants.
    Every query runs with a server-side `MAX_EXECUTION_TIME`, and its transaction is always
    rolled back.
-6. **Conversation.** The client sends the last few question/SQL pairs, so follow-ups like
+6. **Provider-agnostic LLM layer.** `LLM_PROVIDER=gemini|openrouter` picks the service. Both share
+   one failover policy: retry overloaded models, skip rate-limited ones, prefer whichever model
+   last answered, and enforce a total time budget per question.
+7. **Conversation.** The client sends the last few question/SQL pairs, so follow-ups like
    "only the women" or "what about Sales?" work. The server stays stateless.
 
 ## Setup (Windows)
