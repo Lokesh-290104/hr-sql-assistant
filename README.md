@@ -1,5 +1,14 @@
 # HR NL-to-SQL Assistant
 
+![Answer with auto chart and highlighted SQL](docs/screenshot-answer.png)
+
+<details>
+<summary>Home screen: live KPIs and grouped starter questions</summary>
+
+![Home screen](docs/screenshot-home.png)
+
+</details>
+
 Ask HR questions in plain English ("How many people left Sales this year?") and get a
 safe, read-only SQL query, the results, and a short explanation. It supports follow-up
 questions, asks for clarification when a question is ambiguous, and restricts sensitive
