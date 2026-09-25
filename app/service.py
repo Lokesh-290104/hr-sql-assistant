@@ -1,9 +1,11 @@
 """The NL-to-SQL pipeline: question -> prompt -> LLM -> validate -> execute (-> repair)."""
 
+import logging
+import sqlite3
 import time
 from dataclasses import asdict, dataclass, field
 
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import DisconnectionError, InterfaceError, SQLAlchemyError
 
 from app import db
 from app.config import settings
@@ -11,6 +13,8 @@ from app.llm import LLMClient, LLMError, parse_answer
 from app.models import metadata
 from app.prompts import build_system_prompt, build_user_prompt
 from app.safety import UnsafeQueryError, validate_sql
+
+logger = logging.getLogger("hr_assistant")
 
 # Role-based access: tables each role is NOT allowed to query.
 ROLE_EXCLUSIONS: dict[str, list[str]] = {
@@ -56,13 +60,14 @@ class QueryAssistant:
             return AskResult(status="error", question=question, error="Please ask a question.")
 
         excluded = ROLE_EXCLUSIONS[role]
-        allowed = {t.name for t in metadata.sorted_tables} - set(excluded)
+        known = {t.name for t in metadata.sorted_tables}
+        allowed = known - set(excluded)
         dialect = db.dialect_name()
-        system = build_system_prompt(
-            db.build_schema_context(exclude_tables=excluded, detail=self.schema_detail),
-            dialect,
-            settings.max_rows,
-        )
+        try:
+            schema = db.build_schema_context(exclude_tables=excluded, detail=self.schema_detail)
+        except SQLAlchemyError as e:  # database down on first use
+            return AskResult(status="error", question=question, error=_infrastructure_message(e))
+        system = build_system_prompt(schema, dialect, settings.max_rows)
         history = history[-settings.history_turns:]
 
         failed_sql: str | None = None
@@ -86,13 +91,20 @@ class QueryAssistant:
 
             try:
                 validated = validate_sql(
-                    answer.sql, dialect=dialect, allowed_tables=allowed, max_rows=settings.max_rows
+                    answer.sql, dialect=dialect, allowed_tables=allowed, known_tables=known,
+                    max_rows=settings.max_rows,
                 )
                 columns, rows, truncated = db.run_query(validated.sql)
             except UnsafeQueryError as e:
                 failed_sql, error = answer.sql, str(e)
                 continue
             except SQLAlchemyError as e:
+                if _is_infrastructure_error(e):
+                    # Not something the LLM can fix: don't burn repair calls on it.
+                    return AskResult(
+                        status="error", question=question, sql=answer.sql,
+                        error=_infrastructure_message(e), attempts=attempts,
+                    )
                 failed_sql, error = answer.sql, _db_error_message(e)
                 continue
 
@@ -108,11 +120,13 @@ class QueryAssistant:
                 attempts=attempts,
             )
 
+        # The detailed error went to the LLM for repair; users get a friendly message instead of DB internals.
+        logger.warning("Giving up after %d attempts for %r: %s", attempts, question, error)
         return AskResult(
             status="error",
             question=question,
             sql=failed_sql,
-            error=f"Could not produce a valid query: {error}",
+            error="I couldn't write a working query for that question. Try rephrasing it or asking something more specific.",
             attempts=attempts,
         )
 
@@ -120,3 +134,37 @@ class QueryAssistant:
 def _db_error_message(e: SQLAlchemyError) -> str:
     original = getattr(e, "orig", None)
     return str(original or e).splitlines()[0]
+
+
+# MySQL error codes that mean "the database is unreachable, refused us, or timed out".
+MYSQL_TIMEOUT = 3024
+MYSQL_INFRA_CODES = {1045, 2002, 2003, 2006, 2013, MYSQL_TIMEOUT}
+
+
+# SQLite result codes: interrupted by our timeout, busy/locked, cannot open the file.
+SQLITE_INFRA_CODES = {sqlite3.SQLITE_INTERRUPT, sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED, sqlite3.SQLITE_CANTOPEN}
+
+
+def _sqlite_code(e: SQLAlchemyError) -> int | None:
+    original = getattr(e, "orig", None)
+    code = getattr(original, "sqlite_errorcode", None) if isinstance(original, sqlite3.Error) else None
+    return code & 0xFF if isinstance(code, int) else None  # primary code without extended bits
+
+
+def _mysql_code(e: SQLAlchemyError) -> int | None:
+    args = getattr(getattr(e, "orig", None), "args", ())
+    return args[0] if args and isinstance(args[0], int) else None
+
+
+def _is_infrastructure_error(e: SQLAlchemyError) -> bool:
+    if isinstance(e, (InterfaceError, DisconnectionError)) or getattr(e, "connection_invalidated", False):
+        return True
+    if _mysql_code(e) in MYSQL_INFRA_CODES:
+        return True
+    return _sqlite_code(e) in SQLITE_INFRA_CODES
+
+
+def _infrastructure_message(e: SQLAlchemyError) -> str:
+    if _mysql_code(e) == MYSQL_TIMEOUT or _sqlite_code(e) == sqlite3.SQLITE_INTERRUPT:
+        return "The query took too long and was stopped. Try a narrower question."
+    return "The database is not reachable right now. Please try again later."

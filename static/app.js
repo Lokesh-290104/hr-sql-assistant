@@ -3,9 +3,20 @@ const form = document.getElementById("composer");
 const input = document.getElementById("question");
 const sendBtn = document.getElementById("send");
 const roleSelect = document.getElementById("role");
+const sidebar = document.getElementById("sidebar");
+const sidebarToggle = document.getElementById("toggleSidebar");
+const welcome = document.getElementById("welcome");
+
+// Matches the server's HISTORY_TURNS: only this many turns reach the LLM anyway.
+const MAX_HISTORY = 3;
+// Above the server's worst case (LLM deadline x repair attempts), so the server gives up first.
+const REQUEST_TIMEOUT_MS = 200_000;
 
 // Conversation memory for follow-up questions; the server is stateless.
 let history = [];
+// Bumped on "New chat" / role switch so late answers from the old conversation are dropped.
+let conversationId = 0;
+let inFlight = null;
 
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -79,8 +90,28 @@ function renderAnswer(data) {
   );
 }
 
+// Fetch JSON, turning non-JSON error pages and HTTP errors into readable messages.
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    // Non-JSON body (e.g. a plain-text 500); handled below.
+  }
+  if (!response.ok) {
+    const detail = data && typeof data.detail === "string" ? data.detail : `Request failed (HTTP ${response.status}).`;
+    throw new Error(detail);
+  }
+  if (data === null) throw new Error("The server sent an unexpected response.");
+  return data;
+}
+
 async function ask(question) {
-  document.getElementById("welcome")?.remove();
+  if (sendBtn.disabled) return;
+  const myConversation = conversationId;
+  inFlight = new AbortController();
+  welcome.remove();
   chat.append(el("div", { class: "msg user" }, question));
   const typing = el("div", { class: "msg bot typing" }, "Writing and checking SQL…");
   chat.append(typing);
@@ -89,57 +120,83 @@ async function ask(question) {
   sendBtn.disabled = true;
 
   try {
-    const response = await fetch("/api/query", {
+    const data = await fetchJson("/api/query", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question, role: roleSelect.value, history }),
+      signal: AbortSignal.any([inFlight.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
     });
-    const data = await response.json();
+    if (myConversation !== conversationId) return;
     typing.remove();
-    if (!response.ok) {
-      const detail = typeof data.detail === "string" ? data.detail : "Request failed.";
-      chat.append(renderAnswer({ status: "error", error: detail }));
-    } else {
-      chat.append(renderAnswer(data));
-      // Clarifications stay in history too, so "4 and above" makes sense as the next message.
-      history.push({ question, sql: data.status === "ok" ? data.sql : null });
-      history = history.slice(-6);
-    }
+    chat.append(renderAnswer(data));
+    // Clarifications stay in history too, so "4 and above" makes sense as the next message.
+    history.push({ question, sql: data.status === "ok" ? data.sql : null });
+    history = history.slice(-MAX_HISTORY);
   } catch (err) {
+    if (myConversation !== conversationId) return;
     typing.remove();
-    chat.append(renderAnswer({ status: "error", error: "Could not reach the server. Is it running?" }));
+    let message = err.message;
+    if (err.name === "TimeoutError") message = "The request took too long. Please try again.";
+    else if (err instanceof TypeError) message = "Could not reach the server. Is it running?";
+    chat.append(renderAnswer({ status: "error", error: message }));
   } finally {
-    sendBtn.disabled = false;
-    input.focus();
-    scrollToBottom();
+    if (myConversation === conversationId) {
+      sendBtn.disabled = false;
+      input.focus();
+      scrollToBottom();
+    }
   }
 }
 
 async function loadSchema() {
   const container = document.getElementById("schema");
-  const tables = await fetch(`/api/schema?role=${roleSelect.value}`).then((r) => r.json());
-  container.replaceChildren(
-    ...tables.map((t) =>
-      el(
-        "details",
-        {},
-        el("summary", {}, t.name),
-        t.description ? el("p", { class: "desc" }, t.description) : null,
-        el("ul", {}, ...t.columns.map((c) => el("li", {}, `${c.name} · ${c.type.toLowerCase()}`)))
+  try {
+    const tables = await fetchJson(`/api/schema?role=${encodeURIComponent(roleSelect.value)}`);
+    container.replaceChildren(
+      ...tables.map((t) =>
+        el(
+          "details",
+          {},
+          el("summary", {}, t.name),
+          t.description ? el("p", { class: "desc" }, t.description) : null,
+          el("ul", {}, ...t.columns.map((c) => el("li", {}, `${c.name} · ${c.type.toLowerCase()}`)))
+        )
       )
-    )
-  );
+    );
+  } catch (err) {
+    container.replaceChildren(el("p", { class: "desc" }, `Could not load tables: ${err.message}`));
+  }
 }
 
 async function loadExamples() {
-  const examples = await fetch("/api/examples").then((r) => r.json());
-  document
-    .getElementById("examples")
-    .replaceChildren(...examples.map((q) => {
-      const chip = el("button", { class: "chip", type: "button" }, q);
-      chip.addEventListener("click", () => ask(q));
-      return chip;
-    }));
+  const container = document.getElementById("examples");
+  try {
+    const examples = await fetchJson("/api/examples");
+    container.replaceChildren(
+      ...examples.map((q) => {
+        const chip = el("button", { class: "chip", type: "button" }, q);
+        chip.addEventListener("click", () => ask(q));
+        return chip;
+      })
+    );
+  } catch {
+    container.replaceChildren();
+  }
+}
+
+function newConversation(note) {
+  conversationId += 1;
+  inFlight?.abort();
+  sendBtn.disabled = false;
+  history = [];
+  chat.replaceChildren(welcome);
+  if (note) welcome.prepend(el("p", { class: "meta" }, note));
+  input.focus();
+}
+
+function setSidebar(open) {
+  sidebar.classList.toggle("open", open);
+  sidebarToggle.setAttribute("aria-expanded", String(open));
 }
 
 form.addEventListener("submit", (event) => {
@@ -149,13 +206,26 @@ form.addEventListener("submit", (event) => {
 });
 
 roleSelect.addEventListener("change", () => {
-  history = [];
+  // Answers from the previous role shouldn't linger on screen or feed follow-ups.
+  welcome.querySelector(".meta")?.remove();
+  newConversation(`Switched to ${roleSelect.selectedOptions[0].text}. New conversation started.`);
   loadSchema();
 });
 
-document.getElementById("newChat").addEventListener("click", () => location.reload());
-document.getElementById("toggleSidebar").addEventListener("click", () => {
-  document.getElementById("sidebar").classList.toggle("open");
+document.getElementById("newChat").addEventListener("click", () => {
+  welcome.querySelector(".meta")?.remove();
+  newConversation();
+});
+
+sidebarToggle.addEventListener("click", (event) => {
+  event.stopPropagation();
+  setSidebar(!sidebar.classList.contains("open"));
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") setSidebar(false);
+});
+document.addEventListener("click", (event) => {
+  if (sidebar.classList.contains("open") && !sidebar.contains(event.target)) setSidebar(false);
 });
 
 loadSchema();

@@ -13,7 +13,7 @@ import sys
 
 from sqlalchemy import create_engine, text
 
-from app.config import mysql_url
+from app.config import DEFAULT_MYSQL_APP_USER, DEFAULT_MYSQL_DATABASE, mysql_url
 from scripts.seed import seed
 
 
@@ -23,8 +23,8 @@ def main() -> None:
     if not root_password or not app_password:
         sys.exit("Set MYSQL_ROOT_PASSWORD and MYSQL_APP_PASSWORD in .env first.")
 
-    database = os.getenv("MYSQL_DATABASE", "hr_assistant")
-    app_user = os.getenv("MYSQL_APP_USER", "hr_readonly")
+    database = os.getenv("MYSQL_DATABASE", DEFAULT_MYSQL_DATABASE)
+    app_user = os.getenv("MYSQL_APP_USER", DEFAULT_MYSQL_APP_USER)
     if not database.replace("_", "").isalnum() or not app_user.replace("_", "").isalnum():
         sys.exit("MYSQL_DATABASE and MYSQL_APP_USER may only contain letters, digits and underscores.")
 

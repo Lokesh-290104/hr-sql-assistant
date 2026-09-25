@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 
 # Point the app at a throwaway SQLite database before any app module reads settings.
-_DB_PATH = Path(tempfile.gettempdir()) / "hr_assistant_test.db"
+_DB_PATH = Path(tempfile.gettempdir()) / f"hr_assistant_test_{os.getpid()}.db"
 os.environ["DATABASE_URL"] = f"sqlite:///{_DB_PATH.as_posix()}"
 os.environ["GEMINI_API_KEY"] = ""
 
@@ -23,6 +23,7 @@ def seeded_db():
     from app.db import get_engine
 
     get_engine().dispose()
+    _DB_PATH.unlink(missing_ok=True)
 
 
 class FakeLLM:
