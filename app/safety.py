@@ -18,7 +18,8 @@ from dataclasses import dataclass
 
 import sqlglot
 from sqlglot import exp
-from sqlglot.errors import ParseError
+from sqlglot.errors import SqlglotError
+from sqlglot.optimizer.scope import traverse_scope
 
 
 class UnsafeQueryError(ValueError):
@@ -31,13 +32,20 @@ FORBIDDEN_NODES = tuple(
         "Insert", "Update", "Delete", "Merge", "Drop", "Create", "Alter", "TruncateTable",
         "Grant", "Revoke", "Command", "Set", "Use", "Into", "Lock", "Transaction", "Commit",
         "Rollback", "Pragma", "LoadData", "Copy", "Kill", "Describe", "Show",
+        # @@system_variables and @user_variables reveal server config or carry state between queries
+        "SessionParameter", "Parameter",
     )
     if hasattr(exp, name)
 )
 
 FORBIDDEN_FUNCTIONS = {
-    "sleep", "pg_sleep", "benchmark", "load_file", "get_lock", "release_lock",
+    # time / resource abuse, file access, OS commands
+    "sleep", "pg_sleep", "benchmark", "load_file", "load_extension", "get_lock", "release_lock",
+    "randomblob", "zeroblob",
     "sys_exec", "sys_eval", "master_pos_wait", "source_pos_wait",
+    # server / session introspection
+    "user", "current_user", "session_user", "system_user", "current_role", "connection_id",
+    "database", "schema", "current_schema", "version", "current_version",
 }
 
 
@@ -53,14 +61,17 @@ def validate_sql(
     dialect: str,
     allowed_tables: set[str],
     max_rows: int,
+    known_tables: set[str] | None = None,
 ) -> ValidatedQuery:
+    """known_tables: every real table in the database (defaults to allowed_tables).
+    CTE names may not reuse them, so a CTE can never hide a restricted table."""
     sql = (sql or "").strip().rstrip(";").strip()
     if not sql:
         raise UnsafeQueryError("No SQL was generated.")
 
     try:
         statements = [s for s in sqlglot.parse(sql, read=dialect) if s is not None]
-    except ParseError as e:
+    except SqlglotError as e:  # ParseError and TokenError (e.g. unterminated string)
         raise UnsafeQueryError(f"SQL could not be parsed: {str(e).splitlines()[0]}") from None
 
     if len(statements) != 1:
@@ -78,8 +89,17 @@ def validate_sql(
             if name in FORBIDDEN_FUNCTIONS:
                 raise UnsafeQueryError(f"Function {name.upper()} is not allowed.")
 
-    cte_names = {cte.alias_or_name.lower() for cte in tree.find_all(exp.CTE)}
     allowed = {t.lower() for t in allowed_tables}
+    real_tables = allowed | {t.lower() for t in (known_tables or ())}
+    cte_names = {cte.alias_or_name.lower() for cte in tree.find_all(exp.CTE)}
+    # CTE names are collected across all scopes, so one that reuses a real table name
+    # could whitelist that table elsewhere in the query. Disallow the collision outright.
+    shadowing = cte_names & real_tables
+    if shadowing:
+        raise UnsafeQueryError(
+            f"A WITH (CTE) name may not reuse a table name: {', '.join(sorted(shadowing))}. Use a different alias."
+        )
+    cte_references = _cte_references(tree)
     tables: set[str] = set()
     for table in tree.find_all(exp.Table):
         name = table.name.lower()
@@ -87,7 +107,7 @@ def validate_sql(
             raise UnsafeQueryError("Only plain table references are allowed.")
         if table.args.get("db") or table.args.get("catalog"):
             raise UnsafeQueryError(f"Access to '{table.sql()}' is not allowed.")
-        if name in cte_names:
+        if id(table) in cte_references:
             continue
         if name not in allowed:
             raise UnsafeQueryError(f"Table '{table.name}' does not exist or is not accessible for your role.")
@@ -95,6 +115,22 @@ def validate_sql(
 
     tree = _enforce_limit(tree, max_rows)
     return ValidatedQuery(sql=tree.sql(dialect=dialect), tables=sorted(tables))
+
+
+def _cte_references(tree: exp.Query) -> set[int]:
+    """Table nodes that refer to a CTE visible in their own scope (not merely one with the same name elsewhere)."""
+    try:
+        scopes = traverse_scope(tree)
+    except SqlglotError as e:
+        raise UnsafeQueryError(f"SQL could not be analysed: {str(e).splitlines()[0]}") from None
+    refs: set[int] = set()
+    for scope in scopes:
+        for table in scope.tables:
+            # Match on the table's own name against CTEs visible in its scope. Never go through
+            # aliases: `FROM salaries AS a JOIN (...) AS a` would make the alias map point elsewhere.
+            if not table.args.get("db") and table.name in scope.cte_sources:
+                refs.add(id(table))
+    return refs
 
 
 def _enforce_limit(tree: exp.Query, max_rows: int) -> exp.Query:

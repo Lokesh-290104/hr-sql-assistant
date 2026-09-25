@@ -2,6 +2,7 @@
 
 import json
 import re
+import threading
 import time
 from dataclasses import dataclass
 from typing import Protocol
@@ -25,8 +26,15 @@ class LLMAnswer:
 
 
 class GeminiClient:
-    # Rate limits and overload are temporary: retry with backoff, then try the next model.
-    RETRYABLE_CODES = {429, 500, 503, 504}
+    """Gemini with failover across models.
+
+    - 500/503/504 (overloaded): retry the same model once with backoff, then move on.
+    - 429 (quota exhausted), 404 (model gone), network errors/timeouts: move to the next model.
+    - The first model that answers becomes the preferred one for later calls.
+    - A total deadline bounds how long one generate() call can take.
+    """
+
+    RETRY_SAME_MODEL_CODES = {500, 503, 504}
     RETRIES_PER_MODEL = 1
 
     def __init__(self, api_key: str | None = None, model: str | None = None):
@@ -40,35 +48,65 @@ class GeminiClient:
         )
         self._types = genai.types
         self._api_error = genai.errors.APIError
-        self.model = model or settings.gemini_model
-        self.models = [self.model] + [m for m in settings.gemini_fallback_models if m != self.model]
+        self.models = [model or settings.gemini_model] + [
+            m for m in settings.gemini_fallback_models if m != (model or settings.gemini_model)
+        ]
+        self._preferred = self.models[0]
+        self._lock = threading.Lock()
+
+    @property
+    def active_model(self) -> str:
+        return self._preferred
+
+    def _ordered_models(self) -> list[str]:
+        with self._lock:
+            preferred = self._preferred
+        return [preferred] + [m for m in self.models if m != preferred]
 
     def generate(self, system: str, user: str) -> str:
-        config = self._types.GenerateContentConfig(
-            system_instruction=system,
-            temperature=0,
-            response_mime_type="application/json",
-            automatic_function_calling=self._types.AutomaticFunctionCallingConfig(disable=True),
-        )
-        last_error: Exception | None = None
-        for model in self.models:
+        def config(timeout_ms: int):
+            return self._types.GenerateContentConfig(
+                system_instruction=system,
+                temperature=0,
+                response_mime_type="application/json",
+                automatic_function_calling=self._types.AutomaticFunctionCallingConfig(disable=True),
+                http_options=self._types.HttpOptions(timeout=timeout_ms),
+            )
+
+        deadline = time.monotonic() + settings.llm_deadline_ms / 1000
+        failures: list[str] = []
+        for model in self._ordered_models():
             for attempt in range(self.RETRIES_PER_MODEL + 1):
+                remaining_ms = int((deadline - time.monotonic()) * 1000)
+                if remaining_ms < 1000:
+                    raise LLMError(_failure_message(failures, timed_out=True))
                 try:
-                    response = self._client.models.generate_content(model=model, contents=user, config=config)
-                    if model != self.models[0]:
-                        # Stick with the model that works instead of waiting on the overloaded one again.
-                        self.models.remove(model)
-                        self.models.insert(0, model)
-                    return response.text or ""
+                    response = self._client.models.generate_content(
+                        model=model, contents=user, config=config(min(settings.llm_timeout_ms, remaining_ms))
+                    )
                 except self._api_error as e:
-                    last_error = e
-                    if e.code not in self.RETRYABLE_CODES:
-                        break  # e.g. 404 model not found: skip straight to the next model
-                    if attempt < self.RETRIES_PER_MODEL:
+                    failures.append(f"{model}: {e.code}")
+                    if e.code in self.RETRY_SAME_MODEL_CODES and attempt < self.RETRIES_PER_MODEL:
                         time.sleep(2**attempt)
-                except Exception as e:  # network errors etc.
-                    raise LLMError(f"Gemini request failed: {e}") from e
-        raise LLMError(f"Gemini request failed: {last_error}")
+                        continue
+                    break
+                except Exception as e:  # timeouts and network errors: try the next model
+                    failures.append(f"{model}: {type(e).__name__}")
+                    break
+                with self._lock:
+                    self._preferred = model
+                return response.text or ""
+        raise LLMError(_failure_message(failures))
+
+
+def _failure_message(failures: list[str], timed_out: bool = False) -> str:
+    if any(f.endswith(": 429") for f in failures):
+        reason = "the Gemini quota is used up (free tier: limited requests per model per day)"
+    elif timed_out:
+        reason = "Gemini took too long to respond"
+    else:
+        reason = "Gemini is unavailable right now"
+    return f"The AI service could not answer: {reason}. Try again later. [{', '.join(failures)}]"
 
 
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
@@ -94,4 +132,7 @@ def parse_answer(raw: str) -> LLMAnswer:
     sql = sql.strip() if isinstance(sql, str) and sql.strip() else None
     clarification = data.get("clarification")
     clarification = clarification.strip() if isinstance(clarification, str) and clarification.strip() else None
-    return LLMAnswer(sql=sql, explanation=str(data.get("explanation") or "").strip(), clarification=clarification)
+    explanation = str(data.get("explanation") or "").strip()
+    if sql is None and clarification is None and not explanation:
+        raise LLMError("The model returned an empty answer.")
+    return LLMAnswer(sql=sql, explanation=explanation, clarification=clarification)

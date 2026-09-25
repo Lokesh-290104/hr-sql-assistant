@@ -15,10 +15,12 @@ def test_health(client):
 
 
 def test_schema_hides_restricted_tables_for_managers(client):
-    admin = {t["name"] for t in client.get("/api/schema").json()}
+    admin = {t["name"] for t in client.get("/api/schema?role=hr_admin").json()}
     manager = {t["name"] for t in client.get("/api/schema?role=manager").json()}
+    default = {t["name"] for t in client.get("/api/schema").json()}
     assert "salaries" in admin
     assert "salaries" not in manager
+    assert default == manager  # least privilege by default
 
 
 def test_query_endpoint(client, monkeypatch, fake_llm):

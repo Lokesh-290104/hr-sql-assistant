@@ -1,10 +1,14 @@
 """Database access: engine, schema context for the LLM, and guarded query execution."""
 
 import datetime as dt
+import sqlite3
+import time
 from decimal import Decimal
 from functools import lru_cache
+from pathlib import Path
 
-from sqlalchemy import Engine, String, create_engine, func, select
+from sqlalchemy import Engine, String, create_engine, func, make_url, select
+from sqlalchemy.pool import QueuePool
 
 from app.config import settings
 from app.models import metadata
@@ -12,11 +16,26 @@ from app.models import metadata
 # Low-cardinality text columns whose real values are shown to the LLM, so it writes
 # WHERE status = 'On Leave' instead of guessing 'on_leave'.
 MAX_SAMPLE_VALUES = 15
+# Largest string/blob SQLite may build, so one query can't allocate gigabytes.
+SQLITE_MAX_VALUE_BYTES = 1_000_000
 
 
 @lru_cache
 def get_engine() -> Engine:
-    return create_engine(settings.database_url, pool_pre_ping=True)
+    url = make_url(settings.database_url)
+    if url.get_backend_name() == "sqlite" and url.database and url.database != ":memory:":
+        # Open the SQLite file read-only, the same guarantee the MySQL app user gives.
+        uri = Path(url.database).resolve().as_uri() + "?mode=ro"  # as_uri() percent-encodes the path
+
+        def connect() -> sqlite3.Connection:
+            conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+            conn.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, SQLITE_MAX_VALUE_BYTES)
+            return conn
+
+        # QueuePool hands each connection to one thread at a time. (A bare "sqlite://" URL
+        # would default to SingletonThreadPool, which closes connections still in use.)
+        return create_engine("sqlite://", creator=connect, poolclass=QueuePool)
+    return create_engine(url, pool_pre_ping=True)
 
 
 def dialect_name(engine: Engine | None = None) -> str:
@@ -42,6 +61,10 @@ def _categorical_values(engine: Engine) -> dict[tuple[str, str], list[str]]:
 @lru_cache
 def _cached_categorical_values() -> dict[tuple[str, str], list[str]]:
     return _categorical_values(get_engine())
+
+
+def warm_schema_cache() -> None:
+    _cached_categorical_values()
 
 
 def build_schema_context(
@@ -112,13 +135,21 @@ def run_query(sql: str, max_rows: int | None = None) -> tuple[list[str], list[li
     max_rows = max_rows or settings.max_rows
     engine = get_engine()
     with engine.connect() as conn:
+        raw = None
         if engine.dialect.name == "mysql":
             conn.exec_driver_sql(f"SET SESSION MAX_EXECUTION_TIME={int(settings.query_timeout_ms)}")
+        elif engine.dialect.name == "sqlite":
+            # SQLite has no server-side timeout; abort from a progress callback instead.
+            raw = conn.connection.dbapi_connection
+            deadline = time.monotonic() + settings.query_timeout_ms / 1000
+            raw.set_progress_handler(lambda: int(time.monotonic() > deadline), 10_000)
         try:
             result = conn.exec_driver_sql(sql)
             columns = list(result.keys())
             fetched = result.fetchmany(max_rows + 1)
         finally:
+            if raw is not None:
+                raw.set_progress_handler(None, 0)
             conn.rollback()
     truncated = len(fetched) > max_rows
     rows = [[_jsonable(v) for v in row] for row in fetched[:max_rows]]

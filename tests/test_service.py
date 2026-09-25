@@ -68,7 +68,9 @@ def test_manager_cannot_see_salaries(fake_llm):
     result = QueryAssistant(llm).ask("Average salary?", role="manager")
 
     assert result.status == "error"
-    assert "salaries" in result.error
+    assert "salaries" not in result.error  # users get a friendly message, not internals
+    _, repair_prompt = llm.calls[1]
+    assert "salaries" in repair_prompt.split("failed with this error:")[1]  # the LLM gets the details
     system, _ = llm.calls[0]
     assert "TABLE salaries" not in system  # restricted tables are hidden from the prompt too
 

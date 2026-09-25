@@ -2,14 +2,24 @@
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_MYSQL_DATABASE = "hr_assistant"
+DEFAULT_MYSQL_APP_USER = "hr_readonly"
+
+
 def _csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _int(name: str, default: int, minimum: int) -> int:
+    return max(minimum, int(os.getenv(name, str(default))))
 
 
 def mysql_url(user: str, password: str, database: str | None) -> str:
@@ -31,11 +41,12 @@ def _default_database_url() -> str:
         return os.environ["DATABASE_URL"]
     if os.getenv("MYSQL_APP_PASSWORD"):
         return mysql_url(
-            os.getenv("MYSQL_APP_USER", "hr_readonly"),
+            os.getenv("MYSQL_APP_USER", DEFAULT_MYSQL_APP_USER),
             os.environ["MYSQL_APP_PASSWORD"],
-            os.getenv("MYSQL_DATABASE", "hr_assistant"),
+            os.getenv("MYSQL_DATABASE", DEFAULT_MYSQL_DATABASE),
         )
-    return "sqlite:///hr_demo.db"
+    # Absolute path, so starting the app from another folder doesn't create an empty database.
+    return f"sqlite:///{(PROJECT_ROOT / 'hr_demo.db').as_posix()}"
 
 
 @dataclass(frozen=True)
@@ -48,16 +59,18 @@ class Settings:
     gemini_fallback_models: list[str] = field(
         default_factory=lambda: _csv(os.getenv("GEMINI_FALLBACK_MODELS", "gemini-3.5-flash,gemini-3.7-flash,gemini-flash-latest"))
     )
-    llm_timeout_ms: int = int(os.getenv("LLM_TIMEOUT_MS", "30000"))
-    max_rows: int = int(os.getenv("MAX_ROWS", "200"))
-    query_timeout_ms: int = int(os.getenv("QUERY_TIMEOUT_MS", "5000"))
+    # Per HTTP call to the LLM, and total across all retries/fallbacks of one generate().
+    llm_timeout_ms: int = _int("LLM_TIMEOUT_MS", 30000, 1000)
+    llm_deadline_ms: int = _int("LLM_DEADLINE_MS", 60000, 1000)
+    max_rows: int = _int("MAX_ROWS", 200, 1)
+    query_timeout_ms: int = _int("QUERY_TIMEOUT_MS", 5000, 100)
     # How many times the LLM may fix its own SQL after a validation/DB error.
-    max_repair_attempts: int = int(os.getenv("MAX_REPAIR_ATTEMPTS", "2"))
+    max_repair_attempts: int = _int("MAX_REPAIR_ATTEMPTS", 2, 0)
     # Conversation turns sent back to the LLM for follow-up questions.
-    history_turns: int = int(os.getenv("HISTORY_TURNS", "3"))
+    history_turns: int = _int("HISTORY_TURNS", 3, 0)
     # Tables a "manager" role may not query (compensation data is HR-admin only).
     restricted_tables: list[str] = field(
-        default_factory=lambda: _csv(os.getenv("RESTRICTED_TABLES", "salaries"))
+        default_factory=lambda: [t.lower() for t in _csv(os.getenv("RESTRICTED_TABLES", "salaries"))]
     )
 
 
