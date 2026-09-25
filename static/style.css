@@ -13,7 +13,9 @@
   --warn-soft: #fff8e6;
   --code-bg: #f1f1ee;
   --radius: 10px;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  font-family: var(--font-sans);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -41,7 +43,8 @@ body {
   display: flex;
   background: var(--bg);
   color: var(--text);
-  font-size: 15px;
+  font-size: 16px;
+  line-height: 1.5;
 }
 
 .sidebar {
@@ -56,7 +59,7 @@ body {
   gap: 16px;
 }
 
-.brand { font-weight: 700; font-size: 17px; }
+.brand { font-weight: 700; font-size: 16px; letter-spacing: -0.01em; }
 
 .field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
 
@@ -72,9 +75,9 @@ select, input {
 .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 
 .schema details { border-bottom: 1px solid var(--border); padding: 6px 0; }
-.schema summary { cursor: pointer; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+.schema summary { cursor: pointer; font-family: var(--font-mono); font-size: 13px; }
 .schema ul { margin: 6px 0 4px; padding-left: 16px; list-style: none; }
-.schema li { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--muted); padding: 1px 0; }
+.schema li { font-family: var(--font-mono); font-size: 12px; color: var(--muted); padding: 1px 0; }
 .schema .desc { font-size: 12px; color: var(--muted); margin: 4px 0 0; }
 
 .api-link { margin-top: auto; color: var(--accent); font-size: 13px; text-decoration: none; }
@@ -89,7 +92,7 @@ select, input {
   border-bottom: 1px solid var(--border);
   background: var(--panel);
 }
-.topbar h1 { font-size: 17px; margin: 0; flex: 1; }
+.topbar h1 { font-size: 20px; font-weight: 600; line-height: 1.2; margin: 0; flex: 1; }
 
 .icon-btn, .text-btn {
   background: none;
@@ -146,12 +149,13 @@ pre {
   padding: 10px 12px;
   border-radius: 8px;
   overflow-x: auto;
+  font-family: var(--font-mono);
   font-size: 13px;
   margin: 8px 0 0;
 }
 
 .table-wrap { overflow: auto; max-height: 420px; margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; }
-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
 th, td { padding: 7px 10px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
 th { position: sticky; top: 0; background: var(--code-bg); font-weight: 600; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
