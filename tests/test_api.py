@@ -48,3 +48,17 @@ def test_rejects_empty_question(client):
 
 def test_ui_is_served(client):
     assert "HR Query Assistant" in client.get("/").text
+
+
+def test_examples_are_grouped_and_role_filtered(client):
+    admin = {g["group"] for g in client.get("/api/examples?role=hr_admin").json()}
+    manager = {g["group"] for g in client.get("/api/examples?role=manager").json()}
+    assert "Pay" in admin and "Pay" not in manager
+    assert all(g["questions"] for g in client.get("/api/examples?role=hr_admin").json())
+
+
+def test_kpis(client):
+    kpis = {k["key"]: k for k in client.get("/api/kpis").json()}
+    assert set(kpis) == {"headcount", "attrition", "open_roles", "avg_rating"}
+    assert kpis["headcount"]["value"] > 0
+    assert 0 <= kpis["attrition"]["value"] <= 100

@@ -19,6 +19,14 @@ flowchart LR
     D -->|rows| A
 ```
 
+## What you see
+
+- **Live KPI strip:** headcount, 12-month attrition, open roles and average rating, straight from the database (no LLM).
+- **Auto charts:** answers with a label and 1-3 numeric columns render as a bar or line chart (time-like labels become lines), with a Chart/Table toggle.
+- **Answer cards:** plain-English explanation, syntax-highlighted SQL with Copy, CSV download, latency and the model that answered.
+- **Grouped starter questions** (People, Pay, Leave & attendance, Hiring & performance); groups a role can't access are hidden.
+- Dark-first design with a light theme toggle; works on mobile.
+
 ## How it works
 
 1. **Schema context.** Every prompt includes the tables, types, keys, foreign keys,
