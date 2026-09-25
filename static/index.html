@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HR Query Assistant</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f172a'/%3E%3Cpath d='M9 22V10h3v5h8v-5h3v12h-3v-4.5h-8V22z' fill='%232dd4bf'/%3E%3C/svg%3E">
+  <script>
+    // Apply the saved theme before first paint to avoid a flash.
+    try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/static/style.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="30" height="30"><rect width="32" height="32" rx="8" fill="var(--brand-bg)"/><path d="M9 22V10h3v5h8v-5h3v12h-3v-4.5h-8V22z" fill="var(--accent)"/></svg>
+      </span>
+      <div>
+        <div class="brand-name">HR Query Assistant</div>
+        <div class="brand-sub">Plain English → safe SQL</div>
+      </div>
+    </div>
+
+    <label class="field">
+      <span>View data as</span>
+      <select id="role">
+        <option value="hr_admin">HR Admin · all data</option>
+        <option value="manager">Manager · no salaries</option>
+      </select>
+    </label>
+
+    <div class="section-title">Tables you can query</div>
+    <div id="schema" class="schema"></div>
+
+    <div class="sidebar-foot">
+      <div class="status"><span class="status-dot" id="statusDot" aria-hidden="true"></span><span id="statusText">Connecting…</span></div>
+      <a class="api-link" href="/docs" target="_blank" rel="noopener">API docs ↗</a>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <button class="icon-btn" id="toggleSidebar" aria-label="Show tables" aria-controls="sidebar" aria-expanded="false">☰</button>
+      <h1>Ask about your people data</h1>
+      <button class="icon-btn" id="themeToggle" aria-label="Switch theme" title="Switch theme">◐</button>
+      <button class="text-btn" id="newChat">New chat</button>
+    </header>
+
+    <section class="chat" id="chat" aria-live="polite">
+      <div class="welcome" id="welcome">
+        <section class="kpis" id="kpis" aria-label="Key HR metrics"></section>
+        <h2 class="welcome-title">What would you like to know?</h2>
+        <p>Ask in plain English. You'll get the answer, a chart when it helps, and the read-only SQL behind it.</p>
+        <div class="groups" id="examples"></div>
+      </div>
+    </section>
+
+    <form class="composer" id="composer">
+      <div class="composer-box">
+        <input id="question" autocomplete="off" maxlength="500"
+               placeholder="Ask anything, e.g. How many people joined Engineering this year?" aria-label="Your question">
+        <button type="submit" id="send">Ask</button>
+      </div>
+      <p class="composer-hint">Read-only · every query is validated before it runs</p>
+    </form>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
