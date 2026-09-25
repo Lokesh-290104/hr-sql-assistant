@@ -15,6 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app import db
 from app.config import settings
+from app.kpis import compute_kpis
 from app.llm import LLMError, create_llm_client
 from app.models import metadata
 from app.service import ROLE_EXCLUSIONS, QueryAssistant
@@ -22,15 +23,27 @@ from app.service import ROLE_EXCLUSIONS, QueryAssistant
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 logger = logging.getLogger("hr_assistant")
 
-EXAMPLE_QUESTIONS = [
-    "How many active employees are in each department?",
-    "What is the average salary by department?",
-    "Who joined in the last 6 months?",
-    "Which employees are on leave right now?",
-    "Top 10 people with the most approved sick days this year",
-    "Attrition by department: how many people left each department?",
-    "Which job openings have been open the longest, and how many candidates do they have?",
-    "Average performance rating by department for 2025-H2",
+# Starter questions, grouped by topic. Groups whose tables a role can't see are hidden from it.
+EXAMPLE_GROUPS = [
+    {"group": "People", "needs": [], "questions": [
+        "How many active employees are in each department?",
+        "How many people were hired each year?",
+        "Attrition by department: how many people left each department?",
+    ]},
+    {"group": "Pay", "needs": ["salaries"], "questions": [
+        "What is the average salary by department?",
+        "Who are the 10 highest paid employees?",
+    ]},
+    {"group": "Leave & attendance", "needs": [], "questions": [
+        "Which employees are on leave right now?",
+        "Top 10 people with the most approved sick days this year",
+        "Work-from-home days by department",
+    ]},
+    {"group": "Hiring & performance", "needs": [], "questions": [
+        "Which job openings have been open the longest, and how many candidates do they have?",
+        "Candidates by source",
+        "Average performance rating by department for 2025-H2",
+    ]},
 ]
 
 @asynccontextmanager
@@ -91,8 +104,21 @@ def roles():
 
 
 @app.get("/api/examples")
-def examples():
-    return EXAMPLE_QUESTIONS
+def examples(role: Literal["hr_admin", "manager"] = "manager"):
+    hidden = set(ROLE_EXCLUSIONS[role])
+    return [
+        {"group": g["group"], "questions": g["questions"]}
+        for g in EXAMPLE_GROUPS
+        if not hidden & set(g["needs"])
+    ]
+
+
+@app.get("/api/kpis")
+def kpis():
+    try:
+        return compute_kpis()
+    except SQLAlchemyError:
+        raise HTTPException(503, "The database is not reachable right now.")
 
 
 @app.get("/api/schema")

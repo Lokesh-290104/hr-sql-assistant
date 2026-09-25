@@ -37,6 +37,7 @@ class AskResult:
     error: str | None = None
     attempts: int = 0
     latency_ms: int = 0
+    model: str | None = None  # which LLM answered (when the client reports it)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -50,6 +51,8 @@ class QueryAssistant:
     def ask(self, question: str, history: list[dict] | None = None, role: str = "hr_admin") -> AskResult:
         started = time.perf_counter()
         result = self._ask(question.strip(), history or [], role)
+        if result.attempts:
+            result.model = getattr(self.llm, "active_model", None)
         result.latency_ms = int((time.perf_counter() - started) * 1000)
         return result
 
