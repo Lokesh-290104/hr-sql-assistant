@@ -44,8 +44,15 @@ function formatCell(value) {
   return value;
 }
 
+// "avg_salary" -> "Avg salary": SQL aliases are for machines, headers are for people.
+function humanize(column) {
+  const words = String(column).replace(/[_\s]+/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 function renderTable(columns, rows) {
-  const head = el("tr", {}, ...columns.map((c) => el("th", {}, c)));
+  const numeric = columns.map((_, i) => rows.every((r) => r[i] === null || typeof r[i] === "number"));
+  const head = el("tr", {}, ...columns.map((c, i) => el("th", { class: numeric[i] ? "num" : "", title: c }, humanize(c))));
   const body = rows.map((row) =>
     el("tr", {}, ...row.map((v) => el("td", { class: typeof v === "number" ? "num" : "" }, formatCell(v))))
   );
