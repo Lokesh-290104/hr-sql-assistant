@@ -90,7 +90,10 @@ function renderAnswer(data) {
     `${data.row_count} row${data.row_count === 1 ? "" : "s"}${data.truncated ? " (truncated)" : ""}`,
     `${(data.latency_ms / 1000).toFixed(1)}s`,
   ];
-  if (data.attempts > 1) meta.push(`self-corrected after ${data.attempts - 1} failed attempt(s)`);
+  if (data.attempts > 1) {
+    const retries = data.attempts - 1;
+    meta.push(`fixed its own SQL ${retries === 1 ? "once" : `${retries} times`}`);
+  }
 
   return el(
     "div",
