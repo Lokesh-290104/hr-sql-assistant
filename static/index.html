@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HR Query Assistant</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">HR Query Assistant</div>
+    <label class="field">
+      <span>Signed in as</span>
+      <select id="role">
+        <option value="hr_admin">HR Admin (all data)</option>
+        <option value="manager">Manager (no salary data)</option>
+      </select>
+    </label>
+    <div class="section-title">Tables you can query</div>
+    <div id="schema" class="schema"></div>
+    <a class="api-link" href="/docs" target="_blank" rel="noopener">REST API docs &rarr;</a>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <button class="icon-btn" id="toggleSidebar" aria-label="Show tables">&#9776;</button>
+      <h1>Ask about your people data</h1>
+      <button class="text-btn" id="newChat">New chat</button>
+    </header>
+
+    <section class="chat" id="chat" aria-live="polite">
+      <div class="welcome" id="welcome">
+        <p>Ask a question in plain English. I'll write a safe, read-only SQL query, run it and show you the results. Follow-up questions work too.</p>
+        <div class="chips" id="examples"></div>
+      </div>
+    </section>
+
+    <form class="composer" id="composer">
+      <input id="question" autocomplete="off" maxlength="500"
+             placeholder="e.g. How many people joined Engineering this year?" aria-label="Your question">
+      <button type="submit" id="send">Ask</button>
+    </form>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
