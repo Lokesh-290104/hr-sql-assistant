@@ -8,6 +8,8 @@ from pathlib import Path
 _DB_PATH = Path(tempfile.gettempdir()) / f"hr_assistant_test_{os.getpid()}.db"
 os.environ["DATABASE_URL"] = f"sqlite:///{_DB_PATH.as_posix()}"
 os.environ["GEMINI_API_KEY"] = ""
+os.environ["OPENROUTER_API_KEY"] = ""
+os.environ["LLM_PROVIDER"] = "gemini"
 
 import pytest  # noqa: E402
 

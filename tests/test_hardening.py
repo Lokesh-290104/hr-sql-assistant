@@ -1,15 +1,16 @@
 """Regression tests for review findings: guardrail bypasses, failover, timeouts and edge cases."""
 
 import dataclasses
-from types import SimpleNamespace
+import json
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
 
 from app import db, llm as llm_module, main
 from app.config import settings
-from app.llm import GeminiClient, LLMError, parse_answer
+from app.llm import FailoverClient, LLMError, OpenRouterClient, ProviderError, create_llm_client, parse_answer
 from app.models import metadata
 from app.safety import UnsafeQueryError, validate_sql
 from app.service import QueryAssistant
@@ -162,35 +163,23 @@ def test_parse_answer_edge_cases():
     assert parse_answer('Sure: {"sql": "SELECT 1", "explanation": "x"} ok').sql == "SELECT 1"
 
 
-# --- Gemini failover ------------------------------------------------------------------------
-
-class FakeAPIError(Exception):
-    def __init__(self, code):
-        super().__init__(f"HTTP {code}")
-        self.code = code
-
+# --- LLM failover (shared by every provider) --------------------------------------------------
 
 def make_client(behaviour, models=("a", "b", "c")):
-    """GeminiClient without the SDK: behaviour maps model -> list of results/exceptions per call."""
+    """A FailoverClient whose _call follows a script: model -> list of results/exceptions."""
     calls = []
 
-    def generate_content(model, contents, config):
-        calls.append(model)
-        outcome = behaviour[model].pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        return SimpleNamespace(text=outcome)
+    class Scripted(FailoverClient):
+        provider = "Test"
 
-    client = object.__new__(GeminiClient)
-    client._client = SimpleNamespace(models=SimpleNamespace(generate_content=generate_content))
-    client._types = SimpleNamespace(
-        GenerateContentConfig=lambda **k: None, AutomaticFunctionCallingConfig=lambda **k: None, HttpOptions=lambda **k: None
-    )
-    client._api_error = FakeAPIError
-    client.models = list(models)
-    client._preferred = models[0]
-    client._lock = __import__("threading").Lock()
-    return client, calls
+        def _call(self, model, system, user, timeout_ms):
+            calls.append(model)
+            outcome = behaviour[model].pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+    return Scripted(list(models)), calls
 
 
 @pytest.fixture(autouse=True)
@@ -199,7 +188,7 @@ def no_sleep(monkeypatch):
 
 
 def test_overloaded_model_retried_once_then_fallback_is_preferred():
-    client, calls = make_client({"a": [FakeAPIError(503), FakeAPIError(503)], "b": ["{}", "{}"]})
+    client, calls = make_client({"a": [ProviderError(503), ProviderError(503)], "b": ["{}", "{}"]})
     assert client.generate("s", "u") == "{}"
     assert calls == ["a", "a", "b"]
     assert client.active_model == "b"
@@ -208,7 +197,7 @@ def test_overloaded_model_retried_once_then_fallback_is_preferred():
 
 
 def test_quota_exhausted_skips_model_without_retry():
-    client, calls = make_client({"a": [FakeAPIError(429)], "b": ["{}"]})
+    client, calls = make_client({"a": [ProviderError(429)], "b": ["{}"]})
     client.generate("s", "u")
     assert calls == ["a", "b"]
 
@@ -218,9 +207,10 @@ def test_network_error_falls_back():
     assert client.generate("s", "u") == "{}"
 
 
-def test_all_models_out_of_quota_gives_clear_error():
-    client, _ = make_client({m: [FakeAPIError(429)] for m in "abc"})
-    with pytest.raises(LLMError, match="quota"):
+@pytest.mark.parametrize("code, phrase", [(429, "usage limit"), (402, "out of credits"), (401, "key was rejected")])
+def test_all_models_failing_gives_clear_error(code, phrase):
+    client, _ = make_client({m: [ProviderError(code)] for m in "abc"})
+    with pytest.raises(LLMError, match=phrase):
         client.generate("s", "u")
 
 
@@ -228,10 +218,60 @@ def test_deadline_stops_trying(monkeypatch):
     monkeypatch.setattr(llm_module, "settings", dataclasses.replace(settings, llm_deadline_ms=1000))
     ticks = iter([0, 0, 0.5, 2, 2, 2])
     monkeypatch.setattr(llm_module.time, "monotonic", lambda: next(ticks))
-    client, calls = make_client({"a": [FakeAPIError(404)], "b": ["{}"]})
+    client, calls = make_client({"a": [ProviderError(404)], "b": ["{}"]})
     with pytest.raises(LLMError, match="too long"):
         client.generate("s", "u")
     assert calls == ["a"]
+
+
+# --- OpenRouter -----------------------------------------------------------------------------
+
+def openrouter(handler, models=("m1", "m2")):
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    return OpenRouterClient(api_key="test-key", models=list(models), http=http)
+
+
+def test_openrouter_request_and_response():
+    seen = {}
+
+    def handler(request):
+        seen["auth"] = request.headers["authorization"]
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"sql": "SELECT 1"}'}}]})
+
+    assert openrouter(handler).generate("SYSTEM", "USER") == '{"sql": "SELECT 1"}'
+    assert seen["auth"] == "Bearer test-key"
+    assert seen["body"]["model"] == "m1"
+    assert seen["body"]["messages"] == [{"role": "system", "content": "SYSTEM"}, {"role": "user", "content": "USER"}]
+    assert seen["body"]["response_format"] == {"type": "json_object"}
+
+
+def test_openrouter_falls_back_on_rate_limit_and_error_body():
+    def handler(request):
+        model = json.loads(request.content)["model"]
+        if model == "m1":
+            return httpx.Response(429, json={"error": {"message": "rate limited"}})
+        if model == "m2":
+            return httpx.Response(200, json={"error": {"code": 502, "message": "upstream down"}})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
+
+    client = openrouter(handler, models=("m1", "m2", "m3"))
+    assert client.generate("s", "u") == "{}"
+    assert client.active_model == "m3"
+
+
+def test_openrouter_requires_key(monkeypatch):
+    monkeypatch.setattr(llm_module, "settings", dataclasses.replace(settings, openrouter_api_key=""))
+    with pytest.raises(LLMError, match="OPENROUTER_API_KEY"):
+        OpenRouterClient()
+
+
+def test_provider_factory(monkeypatch):
+    monkeypatch.setattr(llm_module, "settings", dataclasses.replace(settings, llm_provider="openrouter", openrouter_api_key="k"))
+    assert isinstance(create_llm_client(), OpenRouterClient)
+    monkeypatch.setattr(llm_module, "settings", dataclasses.replace(settings, llm_provider="nope"))
+    with pytest.raises(LLMError, match="Unknown LLM_PROVIDER"):
+        create_llm_client()
 
 
 def test_health_reports_database():

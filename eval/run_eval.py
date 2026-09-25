@@ -20,7 +20,7 @@ from pathlib import Path
 import sqlglot
 
 from app import db
-from app.llm import GeminiClient
+from app.llm import create_llm_client
 from app.service import QueryAssistant
 
 HERE = Path(__file__).resolve().parent
@@ -65,7 +65,7 @@ def gold_rows(sql: str) -> list[list]:
 
 
 def evaluate(questions: list[dict], detail: str, delay: float) -> dict:
-    assistant = QueryAssistant(GeminiClient(), schema_detail=detail)
+    assistant = QueryAssistant(create_llm_client(), schema_detail=detail)
     records = []
     for i, q in enumerate(questions, start=1):
         expected = gold_rows(q["sql"])

@@ -53,6 +53,16 @@ def _default_database_url() -> str:
 class Settings:
     # Connection used to answer questions. Should be a READ-ONLY database user.
     database_url: str = _default_database_url()
+    # Which LLM service answers questions: "gemini" or "openrouter".
+    llm_provider: str = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
+    openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
+    # Tried in order; the first that answers becomes preferred. ":free" models cost nothing.
+    openrouter_models: list[str] = field(
+        default_factory=lambda: _csv(os.getenv(
+            "OPENROUTER_MODELS",
+            "google/gemma-4-31b-it:free,nvidia/nemotron-3-super-120b-a12b:free,google/gemma-4-26b-a4b-it:free",
+        ))
+    )
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
     # Tried in order when the main model is overloaded or unavailable.
