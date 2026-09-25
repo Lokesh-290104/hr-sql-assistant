@@ -1,6 +1,7 @@
 """LLM clients. The pipeline depends only on the LLMClient protocol, so providers are swappable."""
 
 import json
+import logging
 import re
 import threading
 import time
@@ -8,6 +9,9 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from app.config import settings
+
+
+logger = logging.getLogger("hr_assistant")
 
 
 class LLMError(RuntimeError):
@@ -101,12 +105,13 @@ class GeminiClient:
 
 def _failure_message(failures: list[str], timed_out: bool = False) -> str:
     if any(f.endswith(": 429") for f in failures):
-        reason = "the Gemini quota is used up (free tier: limited requests per model per day)"
+        reason = "today's free Gemini quota is used up"
     elif timed_out:
         reason = "Gemini took too long to respond"
     else:
         reason = "Gemini is unavailable right now"
-    return f"The AI service could not answer: {reason}. Try again later. [{', '.join(failures)}]"
+    logger.warning("Gemini failed (%s): %s", reason, ", ".join(failures))
+    return f"The AI service couldn't answer because {reason}. Please try again later."
 
 
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
