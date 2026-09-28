@@ -10,6 +10,10 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_DB_PATH.as_posix()}"
 os.environ["GEMINI_API_KEY"] = ""
 os.environ["OPENROUTER_API_KEY"] = ""
 os.environ["LLM_PROVIDER"] = "gemini"
+# The app-wide limiter would throttle the suite's many queries; its behaviour is tested
+# directly in test_ratelimit.py.
+os.environ["RATE_LIMIT_PER_MINUTE"] = "0"
+os.environ["RATE_LIMIT_PER_DAY"] = "0"
 
 import pytest  # noqa: E402
 
