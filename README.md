@@ -1,5 +1,7 @@
 # HR NL-to-SQL Assistant
 
+**Live demo: [hr-sql-assistant.onrender.com](https://hr-sql-assistant.onrender.com)** (free instance: the first visit may take up to a minute to wake up)
+
 ![Answer with auto chart and highlighted SQL](docs/screenshot-answer.png)
 
 <details>
