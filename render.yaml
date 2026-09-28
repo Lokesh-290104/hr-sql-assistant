@@ -11,6 +11,11 @@ services:
         value: gemini
       - key: GEMINI_API_KEY
         sync: false          # secret: entered in the Render dashboard, never committed
+      # Gemma on the Gemini API: answered reliably while the Flash models were overloaded.
+      - key: GEMINI_MODEL
+        value: gemma-4-26b-a4b-it
+      - key: GEMINI_FALLBACK_MODELS
+        value: gemini-flash-latest,gemini-3-flash-preview
       - key: OPENROUTER_API_KEY
         sync: false          # optional: only if LLM_PROVIDER=openrouter
       # Public demo: cap LLM spend. Render's proxy appends the real client IP.

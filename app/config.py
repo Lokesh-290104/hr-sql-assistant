@@ -64,10 +64,10 @@ class Settings:
         ))
     )
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
-    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemma-4-26b-a4b-it")
     # Tried in order when the main model is overloaded or unavailable.
     gemini_fallback_models: list[str] = field(
-        default_factory=lambda: _csv(os.getenv("GEMINI_FALLBACK_MODELS", "gemini-3.5-flash,gemini-3.7-flash,gemini-flash-latest"))
+        default_factory=lambda: _csv(os.getenv("GEMINI_FALLBACK_MODELS", "gemini-flash-latest,gemini-3-flash-preview"))
     )
     # Per HTTP call to the LLM, and total across all retries/fallbacks of one generate().
     llm_timeout_ms: int = _int("LLM_TIMEOUT_MS", 30000, 1000)
