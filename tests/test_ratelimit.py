@@ -85,7 +85,7 @@ def test_client_address_uses_the_proxy_header_only_when_trusted(client, monkeypa
             return "stop"  # refuse, so no LLM is needed
 
     monkeypatch.setattr(main, "query_limiter", Recorder(0, 0))
-    headers = {"X-Forwarded-For": "6.6.6.6, 203.0.113.9"}
+    headers = {"X-Forwarded-For": "198.51.100.7, 203.0.113.9"}
 
     client.post("/api/query", json={"question": "q"}, headers=headers)
     monkeypatch.setattr(main, "settings", dataclasses.replace(main.settings, trust_proxy=True))
