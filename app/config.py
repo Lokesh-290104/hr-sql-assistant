@@ -78,6 +78,13 @@ class Settings:
     max_repair_attempts: int = _int("MAX_REPAIR_ATTEMPTS", 2, 0)
     # Conversation turns sent back to the LLM for follow-up questions.
     history_turns: int = _int("HISTORY_TURNS", 3, 0)
+    # Limits on /api/query, which spends LLM quota. 0 disables a limit.
+    rate_limit_per_minute: int = _int("RATE_LIMIT_PER_MINUTE", 10, 0)
+    rate_limit_per_day: int = _int("RATE_LIMIT_PER_DAY", 300, 0)
+    # Behind a reverse proxy (Render, a load balancer), the client address is the last
+    # X-Forwarded-For entry, the one the proxy itself appended. Only enable behind a proxy:
+    # otherwise any caller could send the header and pick its own identity.
+    trust_proxy: bool = os.getenv("TRUST_PROXY", "false").strip().lower() in ("1", "true", "yes")
     # Tables a "manager" role may not query (compensation data is HR-admin only).
     restricted_tables: list[str] = field(
         default_factory=lambda: [t.lower() for t in _csv(os.getenv("RESTRICTED_TABLES", "salaries"))]

@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -18,6 +18,7 @@ from app.config import settings
 from app.kpis import compute_kpis
 from app.llm import LLMError, create_llm_client
 from app.models import metadata
+from app.ratelimit import RateLimiter
 from app.service import ROLE_EXCLUSIONS, QueryAssistant
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
@@ -135,8 +136,23 @@ def schema(role: Literal["hr_admin", "manager"] = "manager"):
     ]
 
 
+query_limiter = RateLimiter(settings.rate_limit_per_minute, settings.rate_limit_per_day)
+
+
+def client_address(request: Request) -> str:
+    if settings.trust_proxy:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded.strip():
+            return forwarded.split(",")[-1].strip()
+    return request.client.host if request.client else "unknown"
+
+
 @app.post("/api/query")
-def query(req: QueryRequest):
+def query(req: QueryRequest, request: Request):
+    # Checked before any LLM call, so a refused request costs no quota.
+    refused = query_limiter.check(client_address(request))
+    if refused:
+        raise HTTPException(429, refused, headers={"Retry-After": "60"})
     try:
         assistant = get_assistant()
     except LLMError as e:

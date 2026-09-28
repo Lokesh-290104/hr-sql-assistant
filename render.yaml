@@ -1,0 +1,22 @@
+# Render Blueprint: New > Blueprint > pick this repo. Render asks for the secret values below.
+services:
+  - type: web
+    name: hr-sql-assistant
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false          # secret: entered in the Render dashboard, never committed
+      - key: OPENROUTER_API_KEY
+        sync: false          # optional: only if LLM_PROVIDER=openrouter
+      # Public demo: cap LLM spend. Render's proxy appends the real client IP.
+      - key: TRUST_PROXY
+        value: "true"
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "10"
+      - key: RATE_LIMIT_PER_DAY
+        value: "300"

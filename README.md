@@ -83,6 +83,21 @@ then fills the database with reproducible demo data. That's 300 employees across
 recruitment, about 16k rows in total. With no MySQL passwords set, the app falls back
 to SQLite (`python -m scripts.seed`).
 
+## Deploy (Render, free)
+
+The `Dockerfile` builds a self-contained demo: the app plus a synthetic SQLite HR database
+generated at build time and opened read-only. `render.yaml` is a Render Blueprint:
+
+1. On [render.com](https://render.com), sign in with GitHub and choose **New > Blueprint**.
+2. Pick this repository. Render reads `render.yaml` and asks for `GEMINI_API_KEY`
+   (and optionally `OPENROUTER_API_KEY`; set `LLM_PROVIDER=openrouter` to use it instead).
+3. Deploy. Every push to `main` redeploys automatically.
+
+Because the demo is public, `/api/query` is rate limited per client (10 questions per minute)
+and globally (300 per day), so nobody can burn the LLM quota; refused requests get
+`429 Too Many Requests` before any model is called. The free instance sleeps when idle, so
+the first visit can take up to a minute to wake it.
+
 ## REST API
 
 | Method | Path | Purpose |

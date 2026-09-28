@@ -1,0 +1,11 @@
+.venv/
+.git/
+.env
+*.db
+__pycache__/
+.pytest_cache/
+eval/results/
+.claude/
+.gstack/
+docs/
+tests/
