@@ -12,7 +12,7 @@ from app.config import settings
 from app.llm import LLMClient, LLMError, parse_answer
 from app.models import metadata
 from app.prompts import build_system_prompt, build_user_prompt
-from app.safety import UnsafeQueryError, validate_sql
+from app.safety import RestrictedTableError, UnsafeQueryError, validate_sql
 
 logger = logging.getLogger("hr_assistant")
 
@@ -98,6 +98,16 @@ class QueryAssistant:
                     max_rows=settings.max_rows,
                 )
                 columns, rows, truncated = db.run_query(validated.sql)
+            except RestrictedTableError as e:
+                # Fail closed: restricted tables are not even in this role's prompt, so the model
+                # only reaches for one when the question itself needs that data. Asking it to
+                # "repair" would just invite a workaround, so refuse now, without another LLM call.
+                logger.info("Refused %r for role %s: %s", question, role, e)
+                return AskResult(
+                    status="error", question=question,
+                    error=f"That question needs data the {role} role can't access. Ask an HR admin.",
+                    attempts=attempts,
+                )
             except UnsafeQueryError as e:
                 failed_sql, error = answer.sql, str(e)
                 continue
