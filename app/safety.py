@@ -26,6 +26,11 @@ class UnsafeQueryError(ValueError):
     """The generated SQL was rejected. The message is safe to show to the user and the LLM."""
 
 
+class RestrictedTableError(UnsafeQueryError):
+    """The SQL reads a real table the caller's role may not see. This is a permission
+    answer, not a mistake the LLM could repair, so the pipeline refuses instead of retrying."""
+
+
 FORBIDDEN_NODES = tuple(
     getattr(exp, name)
     for name in (
@@ -110,7 +115,8 @@ def validate_sql(
         if id(table) in cte_references:
             continue
         if name not in allowed:
-            raise UnsafeQueryError(f"Table '{table.name}' does not exist or is not accessible for your role.")
+            error = RestrictedTableError if name in real_tables else UnsafeQueryError
+            raise error(f"Table '{table.name}' does not exist or is not accessible for your role.")
         tables.add(name)
 
     tree = _enforce_limit(tree, max_rows)

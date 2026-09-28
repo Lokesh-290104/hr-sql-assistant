@@ -1,6 +1,6 @@
 import pytest
 
-from app.safety import UnsafeQueryError, validate_sql
+from app.safety import RestrictedTableError, UnsafeQueryError, validate_sql
 
 TABLES = {"employees", "departments", "salaries"}
 
@@ -54,6 +54,18 @@ def test_rejects_unsafe_queries(sql, message):
 def test_role_restricted_table_is_rejected():
     with pytest.raises(UnsafeQueryError, match="salaries"):
         check("SELECT * FROM salaries", tables={"employees", "departments"})
+
+
+def test_restricted_and_unknown_tables_are_told_apart():
+    known = {"employees", "departments", "salaries"}
+    allowed = {"employees", "departments"}
+    with pytest.raises(RestrictedTableError):
+        validate_sql("SELECT * FROM salaries", dialect="sqlite", allowed_tables=allowed,
+                     known_tables=known, max_rows=10)
+    with pytest.raises(UnsafeQueryError) as unknown:
+        validate_sql("SELECT * FROM staff", dialect="sqlite", allowed_tables=allowed,
+                     known_tables=known, max_rows=10)
+    assert not isinstance(unknown.value, RestrictedTableError)
 
 
 def test_restricted_table_hidden_inside_subquery_is_rejected():

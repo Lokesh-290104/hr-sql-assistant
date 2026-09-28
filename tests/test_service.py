@@ -62,17 +62,31 @@ def test_clarification_is_returned(fake_llm):
     assert result.clarification == "Which review period?"
 
 
-def test_manager_cannot_see_salaries(fake_llm):
+def test_manager_asking_for_salaries_is_refused_without_a_repair_call(fake_llm):
     salary = {"sql": "SELECT AVG(annual_ctc) FROM salaries", "explanation": "", "clarification": None}
     llm = fake_llm(salary, salary, salary)
     result = QueryAssistant(llm).ask("Average salary?", role="manager")
 
     assert result.status == "error"
+    assert "manager role can't access" in result.error
     assert "salaries" not in result.error  # users get a friendly message, not internals
-    _, repair_prompt = llm.calls[1]
-    assert "salaries" in repair_prompt.split("failed with this error:")[1]  # the LLM gets the details
+    assert result.sql is None and result.rows == []
+    # Fail closed: a permission refusal is final, so the model is not asked to "repair" around it.
+    assert len(llm.calls) == 1 and result.attempts == 1
     system, _ = llm.calls[0]
     assert "TABLE salaries" not in system  # restricted tables are hidden from the prompt too
+
+
+def test_unknown_table_still_gets_a_repair_attempt(fake_llm):
+    llm = fake_llm(
+        {"sql": "SELECT COUNT(*) FROM staff", "explanation": "", "clarification": None},
+        {"sql": "SELECT COUNT(*) AS n FROM employees", "explanation": "Counts.", "clarification": None},
+    )
+    result = QueryAssistant(llm).ask("How many staff?", role="manager")
+
+    assert result.status == "ok" and result.attempts == 2  # a typo'd table is fixable, a permission is not
+    _, repair_prompt = llm.calls[1]
+    assert "staff" in repair_prompt.split("failed with this error:")[1]
 
 
 def test_follow_up_includes_history(fake_llm):
